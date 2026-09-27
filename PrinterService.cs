@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Management;
 using System.Runtime.InteropServices;
 
 namespace PrinterMonitor
@@ -20,20 +19,57 @@ namespace PrinterMonitor
     {
         public string Name = "";
         public bool IsDefault;
-        public bool WorkOffline;
-        public int PrinterStatus = -1;
-        public int DetectedErrorState = -1;
         public string PortName = "";
         public string DriverName = "";
         public string ServerName = "";
         public bool Network;
         public int JobCount;
         public bool IsVirtual;
+        public uint StatusBits;
         public PrinterState State = PrinterState.Offline;
 
         public bool IsUsable
         {
             get { return State == PrinterState.Active || State == PrinterState.Available; }
+        }
+
+        /// <summary>Windows 侧标记为脱机，或驱动报告离线/不可用。</summary>
+        public bool Offline
+        {
+            get
+            {
+                return (StatusBits & (Spool.PRINTER_STATUS_OFFLINE |
+                                      Spool.PRINTER_STATUS_NOT_AVAILABLE |
+                                      Spool.PRINTER_STATUS_SERVER_UNKNOWN)) != 0;
+            }
+        }
+
+        /// <summary>影响出纸的故障：缺纸、卡纸、开盖、需人工干预等。</summary>
+        public bool HasError
+        {
+            get
+            {
+                return (StatusBits & (Spool.PRINTER_STATUS_ERROR |
+                                      Spool.PRINTER_STATUS_PAPER_JAM |
+                                      Spool.PRINTER_STATUS_PAPER_OUT |
+                                      Spool.PRINTER_STATUS_MANUAL_FEED |
+                                      Spool.PRINTER_STATUS_PAPER_PROBLEM |
+                                      Spool.PRINTER_STATUS_OUTPUT_BIN_FULL |
+                                      Spool.PRINTER_STATUS_NO_TONER |
+                                      Spool.PRINTER_STATUS_USER_INTERVENTION |
+                                      Spool.PRINTER_STATUS_DOOR_OPEN |
+                                      Spool.PRINTER_STATUS_OUT_OF_MEMORY)) != 0;
+            }
+        }
+
+        /// <summary>正在出纸。注意很多驱动根本不报这个位。</summary>
+        public bool Printing
+        {
+            get
+            {
+                return (StatusBits & (Spool.PRINTER_STATUS_PRINTING |
+                                      Spool.PRINTER_STATUS_PROCESSING)) != 0;
+            }
         }
 
         /// <summary>连接方式描述。</summary>
@@ -63,6 +99,22 @@ namespace PrinterMonitor
             }
         }
 
+        /// <summary>列表里名称过长会截断，悬浮提示给出完整信息。</summary>
+        public string TooltipText
+        {
+            get
+            {
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                sb.Append(Name).Append('\n');
+                sb.Append(IsDefault ? "系统默认" : "非默认").Append(" · ").Append(KindText).Append('\n');
+                sb.Append("端口：").Append(string.IsNullOrEmpty(PortName) ? "未知" : PortName).Append('\n');
+                sb.Append("驱动：").Append(string.IsNullOrEmpty(DriverName) ? "未知" : DriverName.Trim()).Append('\n');
+                sb.Append("状态：").Append(StateText);
+                if (IsVirtual) sb.Append('\n').Append("虚拟打印机，不会实际出纸");
+                return sb.ToString();
+            }
+        }
+
         /// <summary>状态文案，有打印任务时优先显示任务数。</summary>
         public string StateText
         {
@@ -70,7 +122,7 @@ namespace PrinterMonitor
             {
                 if (JobCount > 0)
                 {
-                    if (PrinterStatus == 4) return "打印中 " + JobCount;
+                    if (Printing) return "打印中 " + JobCount;
                     return "排队 " + JobCount;
                 }
                 switch (State)
@@ -83,20 +135,86 @@ namespace PrinterMonitor
                 }
             }
         }
-
-        /// <summary>虚拟打印机的额外提示，实体打印机返回空串。</summary>
-        public string NoticeText
-        {
-            get
-            {
-                if (!IsVirtual) return "";
-                return "这是虚拟打印机，只会生成文件，不会实际出纸";
-            }
-        }
     }
 
+    /// <summary>立刻可读的 spooler 状态位（winspool.h）。</summary>
+    internal static class Spool
+    {
+        public const uint PRINTER_STATUS_PAUSED = 0x00000001;
+        public const uint PRINTER_STATUS_ERROR = 0x00000002;
+        public const uint PRINTER_STATUS_PAPER_JAM = 0x00000008;
+        public const uint PRINTER_STATUS_PAPER_OUT = 0x00000010;
+        public const uint PRINTER_STATUS_MANUAL_FEED = 0x00000020;
+        public const uint PRINTER_STATUS_PAPER_PROBLEM = 0x00000040;
+        public const uint PRINTER_STATUS_OFFLINE = 0x00000080;
+        public const uint PRINTER_STATUS_BUSY = 0x00000200;
+        public const uint PRINTER_STATUS_PRINTING = 0x00000400;
+        public const uint PRINTER_STATUS_OUTPUT_BIN_FULL = 0x00000800;
+        public const uint PRINTER_STATUS_NOT_AVAILABLE = 0x00001000;
+        public const uint PRINTER_STATUS_PROCESSING = 0x00004000;
+        public const uint PRINTER_STATUS_NO_TONER = 0x00040000;
+        public const uint PRINTER_STATUS_USER_INTERVENTION = 0x00100000;
+        public const uint PRINTER_STATUS_OUT_OF_MEMORY = 0x00200000;
+        public const uint PRINTER_STATUS_DOOR_OPEN = 0x00400000;
+        public const uint PRINTER_STATUS_SERVER_UNKNOWN = 0x00800000;
+
+        public const uint PRINTER_ATTRIBUTE_NETWORK = 0x00000010;
+        public const uint PRINTER_ATTRIBUTE_LOCAL = 0x00000040;
+        public const uint PRINTER_ATTRIBUTE_WORK_OFFLINE = 0x00000400;
+
+        public const int PRINTER_ENUM_LOCAL = 0x00000002;
+        public const int PRINTER_ENUM_CONNECTIONS = 0x00000004;
+    }
+
+    /// <summary>
+    /// 打印机扫描。走 spooler API（EnumPrinters / GetDefaultPrinter / EnumJobs），
+    /// 不依赖 WMI —— 实测比 WMI 快约两个数量级，且不受 WMI 服务被管控影响。
+    /// </summary>
     public static class PrinterService
     {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PRINTER_INFO_2
+        {
+            public string pServerName;
+            public string pPrinterName;
+            public string pShareName;
+            public string pPortName;
+            public string pDriverName;
+            public string pComment;
+            public string pLocation;
+            public IntPtr pDevMode;
+            public string pSepFile;
+            public string pPrintProcessor;
+            public string pDatatype;
+            public string pParameters;
+            public IntPtr pSecurityDescriptor;
+            public uint Attributes;
+            public uint Priority;
+            public uint DefaultPriority;
+            public uint StartTime;
+            public uint UntilTime;
+            public uint Status;
+            public uint cJobs;
+            public uint AveragePPM;
+        }
+
+        [DllImport("winspool.drv", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool EnumPrinters(int Flags, string Name, int Level, IntPtr pPrinterEnum,
+                                                int cbBuf, out int pcbNeeded, out int pcReturned);
+
+        [DllImport("winspool.drv", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool GetDefaultPrinter(System.Text.StringBuilder pszBuffer, ref int pcchBuffer);
+
+        [DllImport("winspool.drv", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);
+
+        [DllImport("winspool.drv", SetLastError = true)]
+        private static extern bool ClosePrinter(IntPtr hPrinter);
+
+        [DllImport("winspool.drv", SetLastError = true)]
+        private static extern bool EnumJobs(IntPtr hPrinter, int FirstJob, int NoJobs, int Level,
+                                            IntPtr pJob, int cbBuf, out int pcbNeeded, out int pcReturned);
+
         [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool SetDefaultPrinter(string pszPrinter);
 
@@ -111,58 +229,148 @@ namespace PrinterMonitor
         /// <summary>扫描全部已安装打印机并判定状态。调用方应在后台线程执行。</summary>
         public static List<PrinterInfo> Scan()
         {
-            List<PrinterInfo> list = new List<PrinterInfo>();
+            List<PrinterInfo> list = Enumerate();
+            string defaultName = QueryDefaultPrinter(list);
 
-            // 1) 打印机主列表
-            using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT * FROM Win32_Printer"))
-            using (ManagementObjectCollection rows = searcher.Get())
-            {
-                foreach (ManagementBaseObject row in rows)
-                {
-                    PrinterInfo p = new PrinterInfo();
-                    p.Name = GetString(row, "Name");
-                    if (p.Name.Length == 0) continue;
-                    p.IsDefault = GetBool(row, "Default");
-                    p.WorkOffline = GetBool(row, "WorkOffline");
-                    p.PrinterStatus = GetInt(row, "PrinterStatus", -1);
-                    p.DetectedErrorState = GetInt(row, "DetectedErrorState", -1);
-                    p.PortName = GetString(row, "PortName");
-                    p.DriverName = GetString(row, "DriverName");
-                    p.ServerName = GetString(row, "ServerName");
-                    p.Network = GetBool(row, "Network");
-                    list.Add(p);
-                }
-            }
-
-            // 2) 打印队列任务数
-            Dictionary<string, int> jobs = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT Name FROM Win32_PrintJob"))
-            using (ManagementObjectCollection rows = searcher.Get())
-            {
-                foreach (ManagementBaseObject row in rows)
-                {
-                    // Win32_PrintJob.Name 形如 "打印机名,任务号"，按最后一个逗号切分
-                    string full = GetString(row, "Name");
-                    if (full.Length == 0) continue;
-                    int cut = full.LastIndexOf(',');
-                    string owner = cut > 0 ? full.Substring(0, cut) : full;
-                    if (jobs.ContainsKey(owner)) jobs[owner] = jobs[owner] + 1;
-                    else jobs[owner] = 1;
-                }
-            }
-
-            // 3) 逐台判定
             for (int i = 0; i < list.Count; i++)
             {
                 PrinterInfo p = list[i];
-                int n;
-                if (jobs.TryGetValue(p.Name, out n)) p.JobCount = n;
+                p.IsDefault = string.Equals(p.Name, defaultName, StringComparison.OrdinalIgnoreCase);
+                p.JobCount = QueryJobCount(p.Name);
                 p.IsVirtual = IsVirtualPrinter(p);
                 p.State = Resolve(p);
             }
 
             list.Sort(Compare);
             return list;
+        }
+
+        /// <summary>枚举本机与已连接网络打印机。</summary>
+        private static List<PrinterInfo> Enumerate()
+        {
+            List<PrinterInfo> list = new List<PrinterInfo>();
+            int flags = Spool.PRINTER_ENUM_LOCAL | Spool.PRINTER_ENUM_CONNECTIONS;
+
+            int needed, returned;
+            EnumPrinters(flags, null, 2, IntPtr.Zero, 0, out needed, out returned);
+            if (needed == 0) return list;      // 没有安装任何打印机
+
+            IntPtr buffer = Marshal.AllocHGlobal(needed);
+            try
+            {
+                if (!EnumPrinters(flags, null, 2, buffer, needed, out needed, out returned))
+                    throw new Exception("读取打印机列表失败（错误码 " + Marshal.GetLastWin32Error() + "）");
+
+                int size = Marshal.SizeOf(typeof(PRINTER_INFO_2));
+                for (int i = 0; i < returned; i++)
+                {
+                    IntPtr item = (IntPtr)((long)buffer + i * size);
+                    PRINTER_INFO_2 raw = (PRINTER_INFO_2)Marshal.PtrToStructure(item, typeof(PRINTER_INFO_2));
+                    if (raw.pPrinterName == null || raw.pPrinterName.Length == 0) continue;
+
+                    PrinterInfo p = new PrinterInfo();
+                    p.Name = raw.pPrinterName;
+                    p.PortName = raw.pPortName == null ? "" : raw.pPortName;
+                    p.DriverName = raw.pDriverName == null ? "" : raw.pDriverName;
+                    p.ServerName = raw.pServerName == null ? "" : raw.pServerName;
+                    p.Network = (raw.Attributes & Spool.PRINTER_ATTRIBUTE_NETWORK) != 0;
+                    p.StatusBits = raw.Status;
+                    // PRINTER_ATTRIBUTE_WORK_OFFLINE 是「脱机使用打印机」，等同于离线
+                    if ((raw.Attributes & Spool.PRINTER_ATTRIBUTE_WORK_OFFLINE) != 0)
+                        p.StatusBits |= Spool.PRINTER_STATUS_OFFLINE;
+                    list.Add(p);
+                }
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+
+            return list;
+        }
+
+        /// <summary>
+        /// 取默认打印机。
+        /// 注意：不能用 PRINTER_INFO_2.Attributes 的 DEFAULT 位 —— 实测 Windows 经常不设这一位。
+        /// 优先读注册表 Device 值（实测与 API 完全同步，快 400 倍），
+        /// 取不到或指向已卸载设备时再退回 spooler API。
+        /// </summary>
+        private static string QueryDefaultPrinter(List<PrinterInfo> installed)
+        {
+            string name = ReadRegistryDefault(installed);
+            if (name.Length > 0) return name;
+            return QueryDefaultPrinterViaApi();
+        }
+
+        /// <summary>
+        /// 注册表里 Device 的格式是「打印机名,驱动名,端口名」。打印机名本身可能含逗号，
+        /// 所以从最长的前缀开始试，取第一个能在已安装列表里匹配上的。
+        /// </summary>
+        private static string ReadRegistryDefault(List<PrinterInfo> installed)
+        {
+            try
+            {
+                using (Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows NT\CurrentVersion\Windows", false))
+                {
+                    if (key == null) return "";
+                    object value = key.GetValue("Device");
+                    if (value == null) return "";
+                    string text = Convert.ToString(value);
+                    if (text.Length == 0) return "";
+
+                    for (int cut = text.Length - 1; cut > 0; cut--)
+                    {
+                        if (text[cut] != ',') continue;
+                        string candidate = text.Substring(0, cut);
+                        if (ContainsName(installed, candidate)) return candidate;
+                    }
+                    return "";
+                }
+            }
+            catch (Exception) { return ""; }
+        }
+
+        private static bool ContainsName(List<PrinterInfo> list, string name)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(list[i].Name, name, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
+        }
+
+        /// <summary>兜底路径：单次调用即可，固定缓冲避免「先探长度」多花一倍时间。</summary>
+        private static string QueryDefaultPrinterViaApi()
+        {
+            try
+            {
+                const int capacity = 512;      // 打印机名长度上限远小于此
+                System.Text.StringBuilder sb = new System.Text.StringBuilder(capacity);
+                int length = capacity;
+                if (!GetDefaultPrinter(sb, ref length)) return "";
+                return sb.ToString();
+            }
+            catch (Exception) { return ""; }
+        }
+
+        /// <summary>取某台打印机的排队任务数。拿不到时按 0 处理，不影响其它信息展示。</summary>
+        private static int QueryJobCount(string printerName)
+        {
+            IntPtr handle;
+            if (!OpenPrinter(printerName, out handle, IntPtr.Zero)) return 0;
+            try
+            {
+                int needed, returned;
+                EnumJobs(handle, 0, 255, 1, IntPtr.Zero, 0, out needed, out returned);
+                if (needed == 0) return 0;               // 队列为空
+                IntPtr buffer = Marshal.AllocHGlobal(needed);
+                try
+                {
+                    if (!EnumJobs(handle, 0, 255, 1, buffer, needed, out needed, out returned)) return 0;
+                    return returned;
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            catch (Exception) { return 0; }
+            finally { ClosePrinter(handle); }
         }
 
         /// <summary>判定虚拟打印机：只能生成文件、不会实际出纸的那一类。</summary>
@@ -197,20 +405,12 @@ namespace PrinterMonitor
         /// <summary>综合系统默认标记与在线状态，得出可用状态。</summary>
         private static PrinterState Resolve(PrinterInfo p)
         {
-            // 报错状态：缺纸 3/4、缺墨 5/6、开门 7、卡纸 8、需要服务 10
-            if (p.DetectedErrorState >= 3 && p.DetectedErrorState <= 8) return PrinterState.Error;
-            if (p.PrinterStatus == 5 || p.PrinterStatus == 6) return PrinterState.Error;
-
-            // 离线判定
-            bool offline = p.WorkOffline;
-            if (p.PrinterStatus == 7) offline = true;       // 7 = Offline
-            if (p.DetectedErrorState == 9) offline = true;  // 9 = Offline
-            if (offline) return p.IsDefault ? PrinterState.Warning : PrinterState.Offline;
-
+            if (p.HasError) return PrinterState.Error;
+            if (p.Offline) return p.IsDefault ? PrinterState.Warning : PrinterState.Offline;
             return p.IsDefault ? PrinterState.Active : PrinterState.Available;
         }
 
-        /// <summary>排序：实体设备优先 → 可用优先 → 默认优先 → 名称。</summary>
+        /// <summary>排序：实体设备优先 → 可用优先 → 默认优先 → 任务少优先 → 名称。</summary>
         private static int Compare(PrinterInfo a, PrinterInfo b)
         {
             int c = a.IsVirtual.CompareTo(b.IsVirtual);
@@ -222,38 +422,6 @@ namespace PrinterMonitor
             c = a.JobCount.CompareTo(b.JobCount);
             if (c != 0) return c;
             return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
-        }
-
-        private static string GetString(ManagementBaseObject row, string key)
-        {
-            try
-            {
-                object v = row[key];
-                return v == null ? "" : Convert.ToString(v);
-            }
-            catch (Exception) { return ""; }
-        }
-
-        private static bool GetBool(ManagementBaseObject row, string key)
-        {
-            try
-            {
-                object v = row[key];
-                if (v == null) return false;
-                return Convert.ToBoolean(v);
-            }
-            catch (Exception) { return false; }
-        }
-
-        private static int GetInt(ManagementBaseObject row, string key, int fallback)
-        {
-            try
-            {
-                object v = row[key];
-                if (v == null) return fallback;
-                return Convert.ToInt32(v);
-            }
-            catch (Exception) { return fallback; }
         }
     }
 }

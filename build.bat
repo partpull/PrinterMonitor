@@ -25,7 +25,6 @@ echo 正在编译...
   /reference:"%FW%\System.Core.dll" ^
   /reference:"%FW%\System.Drawing.dll" ^
   /reference:"%FW%\System.Windows.Forms.dll" ^
-  /reference:"%FW%\System.Management.dll" ^
   "%ROOT%Program.cs" ^
   "%ROOT%PrinterService.cs" ^
   "%ROOT%Theme.cs" ^
