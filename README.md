@@ -34,6 +34,8 @@ build.bat
 
 `build.bat` 编译完成后生成 `PrinterMonitor.exe`，双击即可运行。
 
+不想自己编译？到 [Releases](https://github.com/partpull/PrinterMonitor/releases) 下载已编译的 `PrinterMonitor.exe` 即可。
+
 想让程序开机后安静地待在托盘里，勾选界面下方的「开机自启」（或托盘菜单里的同名项）。该选项写入注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，并以 `/tray` 参数启动。
 
 ### 命令行参数
