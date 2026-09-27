@@ -11,14 +11,21 @@ namespace PrinterMonitor
         public PrinterInfo Current;
         public bool HasData;
         public bool HasDefault = true;
+        public bool AutoManaged;
         public string ErrorText = "";
         public int OnlineCount;
         public int TotalCount;
         public DateTime LastUpdate = DateTime.MinValue;
 
+        /// <summary>点击「固定默认」按钮时触发。</summary>
+        public event EventHandler ActionClicked;
+
         private readonly Font _fLabel;
         private readonly Font _fName;
         private readonly Font _fSub;
+
+        private Rectangle _actionRect = Rectangle.Empty;
+        private bool _actionHover;
 
         public HeroPanel()
         {
@@ -28,6 +35,39 @@ namespace PrinterMonitor
             _fLabel = Theme.HeroLabel;
             _fName = Theme.HeroName;
             _fSub = Theme.Sub;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool over = _actionRect.Width > 0 && _actionRect.Contains(e.Location);
+            if (over != _actionHover)
+            {
+                _actionHover = over;
+                Cursor = over ? Cursors.Hand : Cursors.Default;
+                Invalidate(_actionRect);
+            }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_actionHover)
+            {
+                _actionHover = false;
+                Cursor = Cursors.Default;
+                Invalidate(_actionRect);
+            }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && _actionRect.Width > 0 && _actionRect.Contains(e.Location))
+            {
+                EventHandler handler = ActionClicked;
+                if (handler != null) handler(this, EventArgs.Empty);
+            }
+            base.OnMouseUp(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -57,6 +97,7 @@ namespace PrinterMonitor
             string sub;
             string warn = "";
             Color warnColor = Theme.Yellow;
+            bool showAction = false;
 
             if (!HasData)
             {
@@ -87,6 +128,12 @@ namespace PrinterMonitor
                     warn = "系统未设置默认打印机，WPS 打印时会弹窗让你选设备";
                     warnColor = Theme.Yellow;
                 }
+                else if (AutoManaged)
+                {
+                    warn = "Windows 会自动切换默认打印机（按最近使用记录）";
+                    warnColor = Theme.Yellow;
+                    showAction = true;
+                }
                 else if (Current.IsVirtual)
                 {
                     warn = "虚拟打印机，只会生成文件，不会实际出纸";
@@ -108,10 +155,41 @@ namespace PrinterMonitor
                 Theme.Text, TextFormatFlags.Left);
             Theme.DrawText(g, sub, _fSub, new Rectangle(left, Theme.Px(70), textWidth, Theme.Px(18)),
                 Theme.TextMuted, TextFormatFlags.Left);
+
+            // 提示行：右侧可带一个「固定默认」按钮
+            int warnCenter = Theme.Px(101);
+            if (showAction)
+            {
+                int btnW = Theme.MeasurePill(g, "固定默认", _fSub);
+                int btnH = Theme.Px(22);
+                _actionRect = new Rectangle(left + textWidth - btnW, warnCenter - btnH / 2, btnW, btnH);
+            }
+            else
+            {
+                _actionRect = Rectangle.Empty;
+            }
+
             if (warn.Length > 0)
             {
-                Theme.DrawText(g, warn, _fSub, new Rectangle(left, Theme.Px(92), textWidth, Theme.Px(18)),
-                    warnColor, TextFormatFlags.Left);
+                int warnRight = _actionRect.Width > 0 ? _actionRect.X - Theme.Px(8) : left + textWidth;
+                Rectangle warnRect = new Rectangle(left, Theme.Px(92),
+                    Math.Max(Theme.Px(20), warnRight - left), Theme.Px(18));
+                Theme.DrawText(g, warn, _fSub, warnRect, warnColor, TextFormatFlags.Left);
+            }
+
+            if (_actionRect.Width > 0)
+            {
+                bool hover = _actionHover;
+                using (GraphicsPath path = Theme.RoundedRect(_actionRect, _actionRect.Height / 2))
+                {
+                    using (SolidBrush brush = new SolidBrush(hover ? Color.FromArgb(46, Theme.Green)
+                                                                    : Color.FromArgb(22, Theme.Green)))
+                        g.FillPath(brush, path);
+                    using (Pen pen = new Pen(Color.FromArgb(hover ? 210 : 130, Theme.Green), 1f))
+                        g.DrawPath(pen, path);
+                }
+                TextRenderer.DrawText(g, "固定默认", _fSub, _actionRect, Theme.Green,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
         }
     }

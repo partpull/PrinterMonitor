@@ -29,8 +29,10 @@ namespace PrinterMonitor
         private readonly NotifyIcon _tray;
         private readonly ContextMenuStrip _trayMenu;
         private readonly ToolStripMenuItem _trayAutoItem;
+        private readonly ToolStripMenuItem _trayFixItem;
         private readonly ContextMenuStrip _cardMenu;
         private readonly ToolStripMenuItem _cardMenuItem;
+        private readonly ToolTip _tips;
 
         private List<PrinterInfo> _printers = new List<PrinterInfo>();
         private readonly List<PrinterCard> _cards = new List<PrinterCard>();
@@ -42,6 +44,9 @@ namespace PrinterMonitor
         private bool _relayoutPending;
         private bool _reallyExit;
         private bool _trayHintShown;
+        private bool _autoManaged;
+        private string _trayText = "";
+        private string _stateSignature = "";
 
         /// <summary>由 /tray 参数置位：启动后直接缩到托盘，不弹窗口。</summary>
         public bool StartHidden;
@@ -55,11 +60,13 @@ namespace PrinterMonitor
             ClientSize = new Size(Theme.Px(430), Theme.Px(560));
             MinimumSize = new Size(Theme.Px(380), Theme.Px(380));
             StartPosition = FormStartPosition.CenterScreen;
+            AutoScaleMode = AutoScaleMode.None;   // 全部尺寸由 Theme.Px() 手工换算，禁用 WinForms 自带的自动缩放
             DoubleBuffered = true;
             Icon = Program.AppIcon;
             KeyPreview = true;
 
             _hero = new HeroPanel();
+            _hero.ActionClicked += delegate(object s, EventArgs e) { FixDefaultPrinter(); };
             _list = new BufferedFlowPanel();
             _list.FlowDirection = FlowDirection.TopDown;
             _list.WrapContents = false;
@@ -133,6 +140,9 @@ namespace PrinterMonitor
             ToolStripMenuItem refreshItem = new ToolStripMenuItem("立即刷新");
             refreshItem.Click += delegate(object s, EventArgs e) { BeginScan(); };
 
+            _trayFixItem = new ToolStripMenuItem("固定默认打印机（关闭 Windows 自动切换）");
+            _trayFixItem.Click += delegate(object s, EventArgs e) { FixDefaultPrinter(); };
+
             _trayAutoItem = new ToolStripMenuItem("开机自启");
             _trayAutoItem.CheckOnClick = true;
             _trayAutoItem.Checked = _chkAutoStart.Checked;
@@ -154,6 +164,7 @@ namespace PrinterMonitor
             _trayMenu.Items.Add(showItem);
             _trayMenu.Items.Add(refreshItem);
             _trayMenu.Items.Add(new ToolStripSeparator());
+            _trayMenu.Items.Add(_trayFixItem);
             _trayMenu.Items.Add(_trayAutoItem);
             _trayMenu.Items.Add(new ToolStripSeparator());
             _trayMenu.Items.Add(exitItem);
@@ -164,24 +175,34 @@ namespace PrinterMonitor
             _tray.ContextMenuStrip = _trayMenu;
             _tray.Visible = true;
             _tray.DoubleClick += delegate(object s, EventArgs e) { RestoreWindow(); };
+            _tray.MouseClick += delegate(object s, MouseEventArgs e)
+            {
+                // 左键单击也唤出窗口（很多人习惯单击而非双击）
+                if (e.Button == MouseButtons.Left) RestoreWindow();
+            };
+
+            _trayMenu.Opening += delegate(object s, System.ComponentModel.CancelEventArgs e)
+            {
+                _trayFixItem.Enabled = _autoManaged;
+                _trayFixItem.Text = _autoManaged
+                    ? "固定默认打印机（关闭 Windows 自动切换）"
+                    : "默认打印机已固定";
+            };
 
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = 3000;
             _timer.Tick += delegate(object s, EventArgs e) { BeginScan(); };
             _timer.Start();
 
+            _autoManaged = DefaultPrinterPolicy.IsAutoManaged();
+
+            _tips = new ToolTip();
+            _tips.InitialDelay = 500;
+            _tips.ReshowDelay = 200;
+            _tips.AutoPopDelay = 20000;
+
             // 窗口先显示，扫描放到后台，保证启动是瞬时的
-            Shown += delegate(object s, EventArgs e)
-            {
-                if (StartHidden)
-                {
-                    StartHidden = false;
-                    _trayHintShown = true;
-                    ShowInTaskbar = false;
-                    Hide();
-                }
-                BeginScan();
-            };
+            Shown += delegate(object s, EventArgs e) { BeginScan(); };
             Resize += delegate(object s, EventArgs e) { LayoutChildren(); };
             VisibleChanged += delegate(object s, EventArgs e)
             {
@@ -230,6 +251,22 @@ namespace PrinterMonitor
         {
             base.OnLoad(e);
             CenterOnActiveScreen();
+        }
+
+        /// <summary>开机自启（/tray）时以隐藏方式启动，避免窗口一闪而过。</summary>
+        protected override void SetVisibleCore(bool value)
+        {
+            if (StartHidden && value && !IsHandleCreated)
+            {
+                // 首次显示请求直接吞掉：先建好句柄，但保持不可见
+                StartHidden = false;
+                _trayHintShown = true;
+                ShowInTaskbar = false;
+                base.SetVisibleCore(false);
+                BeginScan();
+                return;
+            }
+            base.SetVisibleCore(value);
         }
 
         /// <summary>把窗口摆到鼠标所在屏幕的正中，并确保完整可见（避免跑到屏幕外）。</summary>
@@ -300,7 +337,8 @@ namespace PrinterMonitor
             _inRelayout = true;
             try
             {
-                // 滚动条出现会改变 ClientSize，需要收敛到稳定宽度
+                // 滚动条出现会改变 ClientSize，需要收敛到稳定宽度；设上限防止宽度震荡时空转
+                int guard = 0;
                 do
                 {
                     _relayoutPending = false;
@@ -311,8 +349,9 @@ namespace PrinterMonitor
                         int cw = Math.Max(Theme.Px(140), w - c.Margin.Horizontal - Theme.Px(2));
                         if (c.Width != cw) c.Width = cw;
                     }
+                    guard++;
                 }
-                while (_relayoutPending);
+                while (_relayoutPending && guard < 8);
             }
             finally { _inRelayout = false; }
         }
@@ -323,7 +362,6 @@ namespace PrinterMonitor
         {
             if (_scanning) return;
             _scanning = true;
-            _btnRefresh.Enabled = false;
 
             ThreadPool.QueueUserWorkItem(delegate(object state)
             {
@@ -338,7 +376,6 @@ namespace PrinterMonitor
                     BeginInvoke((MethodInvoker)delegate
                     {
                         _scanning = false;
-                        _btnRefresh.Enabled = true;
                         if (error != null)
                         {
                             _hero.HasData = false;
@@ -357,6 +394,9 @@ namespace PrinterMonitor
         private void ApplyResult(List<PrinterInfo> result)
         {
             _printers = result;
+
+            // 每次扫描重读该策略：若用户在 Windows 设置里改过，界面能自动跟上（读取仅约 0.02ms）
+            _autoManaged = DefaultPrinterPolicy.IsAutoManaged();
 
             PrinterInfo active = null;
             bool hasDefault = false;
@@ -379,18 +419,43 @@ namespace PrinterMonitor
             }
             if (active == null && _printers.Count > 0) active = _printers[0];
 
+            // 只有内容真的变了才重绘，避免每 3 秒的无效刷新
+            string state = BuildStateSignature(active, hasDefault, online);
+            bool changed = state != _stateSignature;
+            _stateSignature = state;
+
             _hero.Current = active;
             _hero.HasData = true;
             _hero.HasDefault = hasDefault;
+            _hero.AutoManaged = _autoManaged;
             _hero.OnlineCount = online;
             _hero.TotalCount = _printers.Count;
             _hero.LastUpdate = DateTime.Now;
-            _hero.Invalidate();
+            _hero.Invalidate();          // 顶部含时间戳，每次扫描都需要重绘
 
             if (_selectedName.Length > 0 && !ContainsName(_selectedName)) _selectedName = "";
-            UpdateList();
+            UpdateList(changed);
             UpdateButtons();
             UpdateTrayText();
+        }
+
+        /// <summary>把影响界面显示的所有字段拼成一个指纹，用于跳过无变化的重绘。</summary>
+        private string BuildStateSignature(PrinterInfo active, bool hasDefault, int online)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append(active == null ? "-" : active.Name).Append('|')
+              .Append(active == null ? 0 : (int)active.State).Append('|')
+              .Append(hasDefault ? '1' : '0').Append('|')
+              .Append(online).Append('|')
+              .Append(_printers.Count).Append('|')
+              .Append(_autoManaged ? '1' : '0').Append('\n');
+            for (int i = 0; i < _printers.Count; i++)
+            {
+                PrinterInfo p = _printers[i];
+                sb.Append(p.Name).Append('|').Append((int)p.State).Append('|')
+                  .Append(p.JobCount).Append('|').Append(p.IsDefault ? '1' : '0').Append('\n');
+            }
+            return sb.ToString();
         }
 
         private bool ContainsName(string name)
@@ -419,8 +484,26 @@ namespace PrinterMonitor
             else if (_hero.HasData)
                 text = "未检测到打印机";
             text = Shorten(text, 60);
+
+            // 内容没变就不写，否则托盘悬浮提示会每 3 秒闪一下
+            if (text == _trayText) return;
+            _trayText = text;
             try { _tray.Text = text; }
             catch (Exception) { _tray.Text = "打印机状态助手"; }
+        }
+
+        /// <summary>关闭 Windows 的「自动管理默认打印机」，让默认设备固定住。</summary>
+        private void FixDefaultPrinter()
+        {
+            if (!DefaultPrinterPolicy.DisableAutoManage())
+            {
+                MessageBox.Show(this,
+                    "写入设置失败，可能需要管理员权限。可以手动在「设置 → 蓝牙和其他设备 → 打印机和扫描仪」中关闭「让 Windows 管理默认打印机」。",
+                    "打印机状态助手", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            Program.Log("已关闭 Windows 自动管理默认打印机");
+            BeginScan();      // 下一次扫描会重新读取策略并刷新界面
         }
 
         // ------------------------------------------------------------------ 列表
@@ -435,24 +518,34 @@ namespace PrinterMonitor
             return sb.ToString();
         }
 
-        private void UpdateList()
+        private void UpdateList(bool contentChanged)
         {
             string signature = BuildSignature();
-            if (signature == _listSignature && _cards.Count > 0)
+            if (signature == _listSignature && _cards.Count > 0 && _cards.Count == _printers.Count)
             {
                 // 结构没变，就地更新，避免重建造成闪动
-                List<PrinterInfo> physical = new List<PrinterInfo>();
-                List<PrinterInfo> virtuals = new List<PrinterInfo>();
-                Split(_printers, physical, virtuals);
-                int index = 0;
                 for (int i = 0; i < _cards.Count; i++)
                 {
-                    _cards[i].Info = _printers[index];
-                    _cards[i].Selected = string.Equals(_printers[index].Name, _selectedName, StringComparison.OrdinalIgnoreCase);
-                    _cards[i].Invalidate();
-                    index++;
+                    _cards[i].Info = _printers[i];
+                    bool selected = string.Equals(_printers[i].Name, _selectedName, StringComparison.OrdinalIgnoreCase);
+                    if (_cards[i].Selected != selected)
+                    {
+                        _cards[i].Selected = selected;
+                        contentChanged = true;
+                    }
+                    if (contentChanged) _cards[i].Invalidate();
                 }
-                UpdateHeaderHints(physical, virtuals);
+                if (contentChanged)
+                {
+                    for (int i = 0; i < _cards.Count; i++)
+                    {
+                        if (_cards[i].Info != null) _tips.SetToolTip(_cards[i], _cards[i].Info.TooltipText);
+                    }
+                    List<PrinterInfo> physical = new List<PrinterInfo>();
+                    List<PrinterInfo> virtuals = new List<PrinterInfo>();
+                    Split(_printers, physical, virtuals);
+                    UpdateHeaderHints(physical, virtuals);
+                }
                 return;
             }
 
@@ -551,6 +644,7 @@ namespace PrinterMonitor
                 card.Width = Math.Max(Theme.Px(140), _list.ClientSize.Width);
                 card.Selected = string.Equals(items[i].Name, _selectedName, StringComparison.OrdinalIgnoreCase);
                 card.ContextMenuStrip = _cardMenu;
+                _tips.SetToolTip(card, items[i].TooltipText);
                 card.Click += delegate(object s, EventArgs e)
                 {
                     PrinterCard source = s as PrinterCard;
@@ -633,6 +727,7 @@ namespace PrinterMonitor
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            Program.Log("收到关闭请求：原因=" + e.CloseReason + " 主动退出=" + _reallyExit);
             if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;

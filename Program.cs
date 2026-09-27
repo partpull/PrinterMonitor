@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -19,15 +19,34 @@ namespace PrinterMonitor
         [STAThread]
         private static void Main(string[] args)
         {
+            // 出问题时留下线索，便于排查（写入 %LOCALAPPDATA%\PrinterMonitor\）
+            Application.ThreadException += delegate(object s, System.Threading.ThreadExceptionEventArgs e)
+            {
+                Log("界面线程未处理异常: " + e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
+            {
+                Log("后台线程未处理异常: " + e.ExceptionObject);
+            };
+            Application.ApplicationExit += delegate(object s, EventArgs e)
+            {
+                Log("进程正常退出 ApplicationExit");
+            };
+
             bool createdNew;
             using (Mutex mutex = new Mutex(true, "PrinterMonitor.SingleInstance.v1", out createdNew))
             {
-                if (!createdNew) return;
+                if (!createdNew)
+                {
+                    Log("已有实例在运行，本次启动退出");
+                    return;
+                }
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
-                // 按系统 DPI 缩放整个界面（配合 app.manifest 的 dpiAware 声明）
+                // 按系统 DPI 缩放整个界面。系统 DPI 感知模式下，桌面 DC 返回的就是系统 DPI，
+// 与窗口所在显示器一致；显示器 DPI 与系统 DPI 不同时由 Windows 做位图拉伸（会略模糊，但尺寸正确）。
                 try
                 {
                     using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
@@ -52,6 +71,21 @@ namespace PrinterMonitor
             }
         }
 
+        /// <summary>把诊断信息追加到 %LOCALAPPDATA%\PrinterMonitor\log.txt，写不进去就算了。</summary>
+        public static void Log(string message)
+        {
+            try
+            {
+                string dir = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrinterMonitor");
+                System.IO.Directory.CreateDirectory(dir);
+                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "  " + message
+                    + Environment.NewLine;
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "log.txt"), line);
+            }
+            catch (Exception) { }
+        }
+
         private static Icon CreateIcon()
         {
             const int size = 32;
@@ -64,7 +98,8 @@ namespace PrinterMonitor
                     using (SolidBrush bg = new SolidBrush(Color.FromArgb(255, 33, 33, 38)))
                         g.FillEllipse(bg, 0, 0, size - 1, size - 1);
                     using (SolidBrush ring = new SolidBrush(Color.FromArgb(255, 70, 70, 80)))
-                        g.DrawEllipse(new Pen(ring, 1f), 0.5f, 0.5f, size - 2f, size - 2f);
+                    using (Pen ringPen = new Pen(ring, 1f))
+                        g.DrawEllipse(ringPen, 0.5f, 0.5f, size - 2f, size - 2f);
                     using (SolidBrush fg = new SolidBrush(Color.FromArgb(255, 50, 240, 140)))
                         g.FillEllipse(fg, 9f, 9f, 14f, 14f);
                 }
@@ -73,6 +108,44 @@ namespace PrinterMonitor
                 DestroyIcon(handle);
                 return icon;
             }
+        }
+    }
+
+    /// <summary>Windows「自动管理默认打印机」策略。开启时默认打印机会随最近使用记录自动切换。</summary>
+    internal static class DefaultPrinterPolicy
+    {
+        private const string KeyPath = @"Software\Microsoft\Windows NT\CurrentVersion\Windows";
+        private const string ValueName = "LegacyDefaultPrinterMode";
+
+        /// <summary>true 表示 Windows 会按最近使用记录自动切换默认打印机。</summary>
+        public static bool IsAutoManaged()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath, false))
+                {
+                    if (key == null) return true;          // 值缺失等价于开启
+                    object value = key.GetValue(ValueName);
+                    if (value == null) return true;
+                    return Convert.ToInt32(value) == 0;    // 0 = 自动管理，1 = 固定为用户所选
+                }
+            }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>关闭自动管理，让默认打印机固定为用户所选（写 HKCU，不需要管理员权限）。</summary>
+        public static bool DisableAutoManage()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath, true))
+                {
+                    if (key == null) return false;
+                    key.SetValue(ValueName, 1, RegistryValueKind.DWord);
+                    return true;
+                }
+            }
+            catch (Exception) { return false; }
         }
     }
 
