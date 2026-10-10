@@ -5,6 +5,212 @@ using System.Windows.Forms;
 
 namespace PrinterMonitor
 {
+    /// <summary>自绘圆角按钮。Primary 为 true 时用主色（绿）配色。</summary>
+    internal sealed class SoftButton : Control
+    {
+        public bool Primary;
+
+        private bool _hover;
+        private bool _pressed;
+        private readonly Font _font;
+
+        public SoftButton()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+            Cursor = Cursors.Hand;
+            _font = Theme.Sub;
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            _hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hover = false;
+            _pressed = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) { _pressed = true; Invalidate(); }
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (_pressed) { _pressed = false; Invalidate(); }
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnTextChanged(EventArgs e)
+        {
+            Invalidate();
+            base.OnTextChanged(e);
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+            Invalidate();
+            base.OnEnabledChanged(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+            int radius = Theme.Px(10);
+
+            Color fill, border, text;
+            if (!Enabled)
+            {
+                fill = Theme.BtnDisabledFill;
+                border = Theme.BtnDisabledBorder;
+                text = Theme.BtnDisabledText;
+            }
+            else if (Primary)
+            {
+                int alpha = _pressed ? 10 : (_hover ? 46 : 26);
+                fill = Color.FromArgb(alpha, Theme.Green);
+                border = Color.FromArgb(_hover ? 150 : 107, Theme.Green);
+                text = Theme.Green;
+            }
+            else
+            {
+                fill = _pressed ? Theme.BtnDown : (_hover ? Theme.BtnHover : Theme.BtnFill);
+                border = Theme.BtnBorder;
+                text = Theme.Text;
+            }
+
+            Theme.FillRounded(g, rect, radius, fill);
+            Theme.DrawRoundedBorder(g, rect, radius, border);
+
+            string label = Text == null ? "" : Text;
+            Rectangle textRect = new Rectangle(Theme.Px(4), 0, Math.Max(Theme.Px(10), Width - Theme.Px(8)), Height);
+            TextRenderer.DrawText(g, label, _font, textRect, text,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+        }
+    }
+
+    /// <summary>自绘开关（文字 + 滑动圆钮），用于「开机自启」。</summary>
+    internal sealed class ToggleSwitch : Control
+    {
+        private const int AnimInterval = 16;
+        private const double AnimStep = 0.16;
+
+        private bool _checked;
+        private double _pos;          // 0 = 关，1 = 开（用于滑动动画）
+        private readonly System.Windows.Forms.Timer _anim;
+        private readonly Font _font;
+
+        /// <summary>勾选状态变化时触发。</summary>
+        public event EventHandler CheckedChanged;
+
+        public bool Checked
+        {
+            get { return _checked; }
+            set
+            {
+                if (_checked == value) return;
+                _checked = value;
+                _anim.Start();
+                Invalidate();
+                EventHandler handler = CheckedChanged;
+                if (handler != null) handler(this, EventArgs.Empty);
+            }
+        }
+
+        public ToggleSwitch()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            BackColor = Theme.Bg;
+            Cursor = Cursors.Hand;
+            _font = Theme.Sub;
+
+            _anim = new System.Windows.Forms.Timer();
+            _anim.Interval = AnimInterval;
+            _anim.Tick += delegate(object s, EventArgs e)
+            {
+                double target = _checked ? 1.0 : 0.0;
+                if (Math.Abs(target - _pos) <= AnimStep)
+                {
+                    _pos = target;
+                    _anim.Stop();
+                }
+                else
+                {
+                    _pos += _checked ? AnimStep : -AnimStep;
+                }
+                Invalidate();
+            };
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            Checked = !_checked;
+            base.OnClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            int trackW = Theme.Px(42);
+            int trackH = Theme.Px(24);
+            int trackX = Math.Max(0, Width - trackW);
+            int trackY = (Height - trackH) / 2;
+
+            Rectangle textRect = new Rectangle(0, 0, Math.Max(Theme.Px(10), trackX - Theme.Px(8)), Height);
+            TextRenderer.DrawText(g, Text == null ? "" : Text, _font, textRect,
+                Enabled ? Theme.TextMuted : Theme.TextDim,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter |
+                TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+
+            Rectangle track = new Rectangle(trackX, trackY, trackW, trackH);
+            // 开启过程中轨道从灰向绿过渡，避免动画期间出现跳色
+            int blend = (int)Math.Round(100.0 * (_pos <= 0 ? 0 : (_pos >= 1 ? 1 : _pos)));
+            Color trackColor = Blend(Theme.SwitchOff, Theme.Green, blend);
+            Theme.FillRounded(g, track, trackH / 2, trackColor);
+
+            int pad = Theme.Px(3);
+            int knob = trackH - pad * 2;
+            int travel = Math.Max(1, trackW - pad * 2 - knob);
+            int knobX = track.X + pad + (int)Math.Round(travel * _pos);
+            Color knobColor = Blend(Theme.SwitchKnobOff, Theme.SwitchKnobOn, blend);
+            Theme.FillRounded(g, new Rectangle(knobX, track.Y + pad, knob, knob), knob / 2, knobColor);
+        }
+
+        private static Color Blend(Color from, Color to, int percent)
+        {
+            if (percent <= 0) return from;
+            if (percent >= 100) return to;
+            return Color.FromArgb(
+                from.A + (to.A - from.A) * percent / 100,
+                from.R + (to.R - from.R) * percent / 100,
+                from.G + (to.G - from.G) * percent / 100,
+                from.B + (to.B - from.B) * percent / 100);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && _anim != null) _anim.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     /// <summary>顶部「当前活跃打印机」大卡片。</summary>
     internal sealed class HeroPanel : Control
     {
@@ -76,21 +282,30 @@ namespace PrinterMonitor
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
             Rectangle card = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
-            Theme.FillRounded(g, card, Theme.Px(12), Theme.HeroCard);
-            Theme.DrawRoundedBorder(g, card, Theme.Px(12), Theme.Border);
+            int radius = Theme.Px(14);
+            Theme.FillRoundedGradient(g, card, radius, Theme.HeroCard, Theme.HeroCardEnd);
+            Theme.DrawTopSheen(g, card, radius, Theme.Px(14));
+            Theme.DrawRoundedBorder(g, card, radius, Theme.HeroBorder);
 
             Color accent = Current == null ? Theme.Gray : Theme.StateColor(Current.State);
-            Rectangle bar = new Rectangle(Theme.Px(14), Theme.Px(18), Theme.Px(4), Math.Max(1, Height - Theme.Px(36)));
-            Theme.FillRounded(g, bar, Theme.Px(2), accent);
 
-            int left = Theme.Px(28);
-            int textWidth = Math.Max(Theme.Px(20), Width - left - Theme.Px(20));
+            // 状态图标块：颜色随当前状态变化
+            Rectangle iconBox = new Rectangle(Theme.Px(18), Theme.Px(24), Theme.Px(42), Theme.Px(42));
+            Theme.FillRounded(g, iconBox, Theme.Px(13), Color.FromArgb(30, accent));
+            Theme.DrawRoundedBorder(g, iconBox, Theme.Px(13), Color.FromArgb(92, accent));
+            Theme.DrawPrinterGlyph(g, iconBox.X + Theme.Px(9), iconBox.Y + Theme.Px(9), Theme.Px(24), accent, 1.8f);
+
+            int left = Theme.Px(74);
+            int right = Width - Theme.Px(18);
+            int textWidth = Math.Max(Theme.Px(20), right - left);
+            int subLeft = Theme.Px(18);
+            int subWidth = Math.Max(Theme.Px(20), Width - Theme.Px(36));
 
             // 标题行：当前活跃打印机 + 最后刷新时间
-            Rectangle labelRect = new Rectangle(left, Theme.Px(15), Math.Max(Theme.Px(20), textWidth - Theme.Px(80)), Theme.Px(18));
+            Rectangle labelRect = new Rectangle(left, Theme.Px(13), Math.Max(Theme.Px(20), textWidth - Theme.Px(90)), Theme.Px(18));
             Theme.DrawText(g, "当前活跃打印机", _fLabel, labelRect, Theme.TextMuted, TextFormatFlags.Left);
-            string stamp = LastUpdate == DateTime.MinValue ? "" : LastUpdate.ToString("HH:mm:ss");
-            Rectangle stampRect = new Rectangle(left + textWidth - Theme.Px(70), Theme.Px(15), Theme.Px(70), Theme.Px(18));
+            string stamp = LastUpdate == DateTime.MinValue ? "" : "更新于 " + LastUpdate.ToString("HH:mm:ss");
+            Rectangle stampRect = new Rectangle(Math.Max(0, right - Theme.Px(96)), Theme.Px(13), Theme.Px(96), Theme.Px(18));
             Theme.DrawText(g, stamp, _fLabel, stampRect, Theme.TextDim, TextFormatFlags.Right);
 
             string name;
@@ -130,7 +345,7 @@ namespace PrinterMonitor
                 }
                 else if (AutoManaged)
                 {
-                    warn = "Windows 会自动切换默认打印机（按最近使用记录）";
+                    warn = "Windows 会按最近使用记录自动切换默认打印机";
                     warnColor = Theme.Yellow;
                     showAction = true;
                 }
@@ -151,18 +366,18 @@ namespace PrinterMonitor
                 }
             }
 
-            Theme.DrawText(g, name, _fName, new Rectangle(left, Theme.Px(34), textWidth, Theme.Px(32)),
+            Theme.DrawText(g, name, _fName, new Rectangle(left, Theme.Px(31), textWidth, Theme.Px(32)),
                 Theme.Text, TextFormatFlags.Left);
-            Theme.DrawText(g, sub, _fSub, new Rectangle(left, Theme.Px(70), textWidth, Theme.Px(18)),
+            Theme.DrawText(g, sub, _fSub, new Rectangle(subLeft, Theme.Px(70), subWidth, Theme.Px(18)),
                 Theme.TextMuted, TextFormatFlags.Left);
 
             // 提示行：右侧可带一个「固定默认」按钮
-            int warnCenter = Theme.Px(101);
+            int warnCenter = Theme.Px(102);
             if (showAction)
             {
                 int btnW = Theme.MeasurePill(g, "固定默认", _fSub);
-                int btnH = Theme.Px(22);
-                _actionRect = new Rectangle(left + textWidth - btnW, warnCenter - btnH / 2, btnW, btnH);
+                int btnH = Theme.Px(24);
+                _actionRect = new Rectangle(right - btnW, warnCenter - btnH / 2, btnW, btnH);
             }
             else
             {
@@ -171,9 +386,9 @@ namespace PrinterMonitor
 
             if (warn.Length > 0)
             {
-                int warnRight = _actionRect.Width > 0 ? _actionRect.X - Theme.Px(8) : left + textWidth;
-                Rectangle warnRect = new Rectangle(left, Theme.Px(92),
-                    Math.Max(Theme.Px(20), warnRight - left), Theme.Px(18));
+                int warnRight = _actionRect.Width > 0 ? _actionRect.X - Theme.Px(10) : right;
+                Rectangle warnRect = new Rectangle(subLeft, Theme.Px(89),
+                    Math.Max(Theme.Px(20), warnRight - subLeft), Theme.Px(27));
                 Theme.DrawText(g, warn, _fSub, warnRect, warnColor, TextFormatFlags.Left);
             }
 
@@ -183,9 +398,9 @@ namespace PrinterMonitor
                 using (GraphicsPath path = Theme.RoundedRect(_actionRect, _actionRect.Height / 2))
                 {
                     using (SolidBrush brush = new SolidBrush(hover ? Color.FromArgb(46, Theme.Green)
-                                                                    : Color.FromArgb(22, Theme.Green)))
+                                                                    : Color.FromArgb(26, Theme.Green)))
                         g.FillPath(brush, path);
-                    using (Pen pen = new Pen(Color.FromArgb(hover ? 210 : 130, Theme.Green), 1f))
+                    using (Pen pen = new Pen(Color.FromArgb(hover ? 160 : 107, Theme.Green), 1f))
                         g.DrawPath(pen, path);
                 }
                 TextRenderer.DrawText(g, "固定默认", _fSub, _actionRect, Theme.Green,
@@ -277,32 +492,69 @@ namespace PrinterMonitor
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            Rectangle card = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
-            Color fill = _hover ? Theme.CardHover : Theme.Card;
-            Theme.FillRounded(g, card, Theme.Px(10), fill);
-            Color border = _selected ? Color.FromArgb(190, 190, 200) : Theme.Border;
-            Theme.DrawRoundedBorder(g, card, Theme.Px(10), border);
+            int radius = Theme.Px(12);
+            // 控件底部预留 4px 用于绘制投影
+            Rectangle card = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - Theme.Px(4) - 1));
+
+            // 卡片投影：卡片下沿外侧的一片渐隐暗影，制造浮起感
+            Rectangle shadow = new Rectangle(card.X + Theme.Px(3), card.Bottom - Theme.Px(2),
+                Math.Max(1, card.Width - Theme.Px(6)), Math.Max(2, Theme.Px(6)));
+            using (GraphicsPath shadowPath = Theme.RoundedRect(shadow, Theme.Px(3)))
+            using (LinearGradientBrush shadowBrush = new LinearGradientBrush(
+                new Rectangle(shadow.X, shadow.Y, shadow.Width, Math.Max(1, shadow.Height)),
+                Color.FromArgb(_hover ? 135 : 100, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), LinearGradientMode.Vertical))
+            {
+                g.FillPath(shadowBrush, shadowPath);
+            }
+
+            // 卡片本体
+            if (_hover)
+                Theme.FillRoundedGradient(g, card, radius, Theme.CardHover, Theme.CardHoverEnd);
+            else
+                Theme.FillRoundedGradient(g, card, radius, Theme.Card, Theme.CardEnd);
+            Theme.DrawTopSheen(g, card, radius, Theme.Px(13));
+
+            // 左侧状态色竖条：上下内缩、右端圆角（左端超出卡片被裁掉，因此紧贴左边缘）
+            Color stateColor = Info == null ? Theme.Gray : Theme.StateColor(Info.State);
+            GraphicsState clipState = g.Save();
+            try
+            {
+                using (GraphicsPath clip = Theme.RoundedRect(card, radius))
+                {
+                    g.SetClip(clip);
+                    int barInset = Theme.Px(12);
+                    int barRadius = Theme.Px(4);
+                    Rectangle bar = new Rectangle(card.X - barRadius, card.Y + barInset,
+                        Theme.Px(8) + barRadius, Math.Max(Theme.Px(8), card.Height - barInset * 2));
+                    using (GraphicsPath barPath = Theme.RoundedRect(bar, barRadius))
+                    using (SolidBrush barBrush = new SolidBrush(stateColor))
+                        g.FillPath(barBrush, barPath);
+                }
+            }
+            finally { g.Restore(clipState); }
+
+            Theme.DrawRoundedBorder(g, card, radius,
+                _selected ? Theme.SelectedBorder : (_hover ? Theme.BorderStrong : Theme.Border));
 
             if (Info == null) return;
 
-            Color stateColor = Theme.StateColor(Info.State);
             int left = Theme.Px(18);
             int right = Width - Theme.Px(18);
             int textRight = right;
 
             // ---- 第一行：状态灯 + 名称 + 默认标签
             int row1Center = Theme.Px(25);
-            Theme.DrawDot(g, left + Theme.Px(5), row1Center, Theme.Px(5), stateColor, !Info.IsUsable);
+            Theme.DrawStatusDot(g, left + Theme.Px(9), row1Center, Theme.Px(4.5), stateColor, !Info.IsUsable);
 
             int nameRight = right;
             if (Info.IsDefault)
             {
                 int pillW = Theme.DrawPill(g, right, row1Center, "默认", _fPill,
-                    Theme.Green, Color.FromArgb(90, Theme.Green), Color.FromArgb(22, Theme.Green));
+                    Theme.Green, Color.FromArgb(97, Theme.Green), Color.FromArgb(33, Theme.Green));
                 nameRight = right - pillW - Theme.Px(10);
             }
 
-            int nameLeft = left + Theme.Px(18);
+            int nameLeft = Theme.Px(40);
             Rectangle nameRect = new Rectangle(nameLeft, Theme.Px(12),
                 Math.Max(Theme.Px(20), nameRight - nameLeft), Theme.Px(26));
             Theme.DrawText(g, Info.Name, _fName, nameRect, Info.IsUsable ? Theme.Text : Theme.TextMuted,
@@ -310,12 +562,12 @@ namespace PrinterMonitor
 
             // ---- 第二行：连接方式 + 细节 + 状态文案
             int row2Center = Theme.Px(53);
-            int detailLeft = left + Theme.Px(18);
+            int detailLeft = Theme.Px(40);
 
             if (Info.IsVirtual)
             {
                 int pillW = Theme.DrawPillAt(g, detailLeft, row2Center, "虚拟打印机", _fPill,
-                    Theme.Yellow, Color.FromArgb(90, Theme.Yellow), Color.FromArgb(20, Theme.Yellow));
+                    Theme.Yellow, Color.FromArgb(87, Theme.Yellow), Color.FromArgb(28, Theme.Yellow));
                 detailLeft = detailLeft + pillW + Theme.Px(10);
             }
             else

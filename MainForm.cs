@@ -22,9 +22,9 @@ namespace PrinterMonitor
         private readonly HeroPanel _hero;
         private readonly BufferedFlowPanel _list;
         private readonly Panel _bottom;
-        private readonly Button _btnSetDefault;
-        private readonly Button _btnRefresh;
-        private readonly CheckBox _chkAutoStart;
+        private readonly SoftButton _btnSetDefault;
+        private readonly SoftButton _btnRefresh;
+        private readonly ToggleSwitch _swAutoStart;
         private readonly System.Windows.Forms.Timer _timer;
         private readonly NotifyIcon _tray;
         private readonly ContextMenuStrip _trayMenu;
@@ -76,39 +76,41 @@ namespace PrinterMonitor
 
             _bottom = new Panel();
             _bottom.BackColor = Theme.Bg;
+            _bottom.Paint += delegate(object s, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(Theme.Divider, 1f))
+                    e.Graphics.DrawLine(pen, 0, 0, _bottom.Width, 0);
+            };
 
-            _btnSetDefault = MakeButton("设为默认");
+            _btnSetDefault = new SoftButton();
+            _btnSetDefault.Text = "设为默认";
+            _btnSetDefault.Primary = true;
             _btnSetDefault.Click += delegate(object s, EventArgs e) { ApplySelectedAsDefault(); };
 
-            _btnRefresh = MakeButton("刷新");
+            _btnRefresh = new SoftButton();
+            _btnRefresh.Text = "刷新";
             _btnRefresh.Click += delegate(object s, EventArgs e) { BeginScan(); };
 
-            _chkAutoStart = new CheckBox();
-            _chkAutoStart.Text = "开机自启";
-            _chkAutoStart.FlatStyle = FlatStyle.Flat;
-            _chkAutoStart.BackColor = Theme.Bg;
-            _chkAutoStart.ForeColor = Theme.TextMuted;
-            _chkAutoStart.Font = Theme.FontAt(12, FontStyle.Regular);
-            _chkAutoStart.Cursor = Cursors.Hand;
-            _chkAutoStart.AutoSize = false;
-            _chkAutoStart.Checked = AutoStart.IsEnabled();
-            _chkAutoStart.CheckedChanged += delegate(object s, EventArgs e)
+            _swAutoStart = new ToggleSwitch();
+            _swAutoStart.Text = "开机自启";
+            _swAutoStart.Checked = AutoStart.IsEnabled();
+            _swAutoStart.CheckedChanged += delegate(object s, EventArgs e)
             {
-                if (AutoStart.Set(_chkAutoStart.Checked))
+                if (AutoStart.Set(_swAutoStart.Checked))
                 {
-                    if (_trayAutoItem.Checked != _chkAutoStart.Checked) _trayAutoItem.Checked = _chkAutoStart.Checked;
+                    if (_trayAutoItem.Checked != _swAutoStart.Checked) _trayAutoItem.Checked = _swAutoStart.Checked;
                 }
                 else
                 {
                     MessageBox.Show(this, "写入开机启动项失败，请检查系统权限。", "打印机状态助手",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    _chkAutoStart.Checked = AutoStart.IsEnabled();
+                    _swAutoStart.Checked = AutoStart.IsEnabled();
                 }
             };
 
             _bottom.Controls.Add(_btnSetDefault);
             _bottom.Controls.Add(_btnRefresh);
-            _bottom.Controls.Add(_chkAutoStart);
+            _bottom.Controls.Add(_swAutoStart);
 
             Controls.Add(_hero);
             Controls.Add(_list);
@@ -145,10 +147,10 @@ namespace PrinterMonitor
 
             _trayAutoItem = new ToolStripMenuItem("开机自启");
             _trayAutoItem.CheckOnClick = true;
-            _trayAutoItem.Checked = _chkAutoStart.Checked;
+            _trayAutoItem.Checked = _swAutoStart.Checked;
             _trayAutoItem.CheckedChanged += delegate(object s, EventArgs e)
             {
-                if (_chkAutoStart.Checked != _trayAutoItem.Checked) _chkAutoStart.Checked = _trayAutoItem.Checked;
+                if (_swAutoStart.Checked != _trayAutoItem.Checked) _swAutoStart.Checked = _trayAutoItem.Checked;
             };
 
             ToolStripMenuItem exitItem = new ToolStripMenuItem("退出");
@@ -213,23 +215,6 @@ namespace PrinterMonitor
                 if (e.KeyCode == Keys.F5) { BeginScan(); e.Handled = true; }
                 if (e.KeyCode == Keys.Escape) { Hide(); e.Handled = true; }
             };
-        }
-
-        private static Button MakeButton(string text)
-        {
-            Button b = new Button();
-            b.Text = text;
-            b.FlatStyle = FlatStyle.Flat;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.BorderColor = Theme.BorderStrong;
-            b.FlatAppearance.MouseOverBackColor = Theme.CardHover;
-            b.FlatAppearance.MouseDownBackColor = Theme.Card;
-            b.BackColor = Theme.Card;
-            b.ForeColor = Theme.Text;
-            b.Font = Theme.FontAt(12, FontStyle.Regular);
-            b.UseVisualStyleBackColor = false;
-            b.Cursor = Cursors.Hand;
-            return b;
         }
 
         private static string Shorten(string text, int max)
@@ -325,8 +310,9 @@ namespace PrinterMonitor
             int btnY = (bottomH - btnH) / 2;
             _btnSetDefault.Bounds = new Rectangle(0, btnY, Theme.Px(92), btnH);
             _btnRefresh.Bounds = new Rectangle(Theme.Px(102), btnY, Theme.Px(66), btnH);
-            int chkW = Theme.Px(96);
-            _chkAutoStart.Bounds = new Rectangle(_bottom.Width - chkW, btnY, chkW, btnH);
+            int swW = Theme.Px(104);
+            int swH = Theme.Px(24);
+            _swAutoStart.Bounds = new Rectangle(_bottom.Width - swW, btnY + (btnH - swH) / 2, swW, swH);
 
             RelayoutList();
         }
@@ -627,7 +613,7 @@ namespace PrinterMonitor
             header.Label = label;
             header.Hint = hint;
             header.Height = Theme.Px(32);
-            header.Margin = new Padding(0, _headers.Count == 0 ? 0 : Theme.Px(10), 0, 0);
+            header.Margin = new Padding(0, _headers.Count == 0 ? 0 : Theme.Px(10), 0, Theme.Px(4));
             header.Width = Math.Max(Theme.Px(140), _list.ClientSize.Width);
             _list.Controls.Add(header);
             _headers.Add(header);
@@ -639,8 +625,9 @@ namespace PrinterMonitor
             {
                 PrinterCard card = new PrinterCard();
                 card.Info = items[i];
-                card.Height = Theme.Px(76);
-                card.Margin = new Padding(0, Theme.Px(6), 0, 0);
+                // 控件高 80：卡片本体 76 + 底部 4px 投影空间
+                card.Height = Theme.Px(80);
+                card.Margin = new Padding(0, Theme.Px(4), 0, 0);
                 card.Width = Math.Max(Theme.Px(140), _list.ClientSize.Width);
                 card.Selected = string.Equals(items[i].Name, _selectedName, StringComparison.OrdinalIgnoreCase);
                 card.ContextMenuStrip = _cardMenu;
@@ -686,7 +673,6 @@ namespace PrinterMonitor
             PrinterInfo p = _selectedName.Length > 0 ? FindByName(_selectedName) : null;
             bool canSet = p != null && !p.IsDefault;
             _btnSetDefault.Enabled = canSet;
-            _btnSetDefault.ForeColor = canSet ? Theme.Text : Theme.TextDim;
             _btnSetDefault.Text = p == null ? "设为默认" : (p.IsDefault ? "已是默认" : "设为默认");
         }
 
