@@ -5,10 +5,11 @@ using System.Windows.Forms;
 
 namespace PrinterMonitor
 {
-    /// <summary>自绘圆角按钮。Primary 为 true 时用主色（绿）配色。</summary>
+    /// <summary>自绘圆角按钮。</summary>
     internal sealed class SoftButton : Control
     {
-        public bool Primary;
+        /// <summary>文字左侧是否绘制刷新图标。</summary>
+        public bool RefreshIcon;
 
         private bool _hover;
         private bool _pressed;
@@ -78,13 +79,6 @@ namespace PrinterMonitor
                 border = Theme.BtnDisabledBorder;
                 text = Theme.BtnDisabledText;
             }
-            else if (Primary)
-            {
-                int alpha = _pressed ? 10 : (_hover ? 46 : 26);
-                fill = Color.FromArgb(alpha, Theme.Green);
-                border = Color.FromArgb(_hover ? 150 : 107, Theme.Green);
-                text = Theme.Green;
-            }
             else
             {
                 fill = _pressed ? Theme.BtnDown : (_hover ? Theme.BtnHover : Theme.BtnFill);
@@ -96,10 +90,26 @@ namespace PrinterMonitor
             Theme.DrawRoundedBorder(g, rect, radius, border);
 
             string label = Text == null ? "" : Text;
-            Rectangle textRect = new Rectangle(Theme.Px(4), 0, Math.Max(Theme.Px(10), Width - Theme.Px(8)), Height);
-            TextRenderer.DrawText(g, label, _font, textRect, text,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
-                TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            if (RefreshIcon)
+            {
+                int iconSize = Theme.Px(14);
+                int gap = Theme.Px(6);
+                int textW = Theme.MeasureWidth(g, label, _font);
+                int groupW = iconSize + gap + textW;
+                int startX = (Width - groupW) / 2;
+                Theme.DrawRefreshGlyph(g, startX, (Height - iconSize) / 2, iconSize, text, 1.5f);
+                Rectangle labelRect = new Rectangle(startX + iconSize + gap, 0, textW + Theme.Px(2), Height);
+                TextRenderer.DrawText(g, label, _font, labelRect, text,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+            }
+            else
+            {
+                Rectangle textRect = new Rectangle(Theme.Px(4), 0, Math.Max(Theme.Px(10), Width - Theme.Px(8)), Height);
+                TextRenderer.DrawText(g, label, _font, textRect, text,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                    TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            }
         }
     }
 
@@ -217,21 +227,14 @@ namespace PrinterMonitor
         public PrinterInfo Current;
         public bool HasData;
         public bool HasDefault = true;
-        public bool AutoManaged;
         public string ErrorText = "";
         public int OnlineCount;
         public int TotalCount;
         public DateTime LastUpdate = DateTime.MinValue;
 
-        /// <summary>点击「固定默认」按钮时触发。</summary>
-        public event EventHandler ActionClicked;
-
         private readonly Font _fLabel;
         private readonly Font _fName;
         private readonly Font _fSub;
-
-        private Rectangle _actionRect = Rectangle.Empty;
-        private bool _actionHover;
 
         public HeroPanel()
         {
@@ -241,39 +244,6 @@ namespace PrinterMonitor
             _fLabel = Theme.HeroLabel;
             _fName = Theme.HeroName;
             _fSub = Theme.Sub;
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            bool over = _actionRect.Width > 0 && _actionRect.Contains(e.Location);
-            if (over != _actionHover)
-            {
-                _actionHover = over;
-                Cursor = over ? Cursors.Hand : Cursors.Default;
-                Invalidate(_actionRect);
-            }
-            base.OnMouseMove(e);
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            if (_actionHover)
-            {
-                _actionHover = false;
-                Cursor = Cursors.Default;
-                Invalidate(_actionRect);
-            }
-            base.OnMouseLeave(e);
-        }
-
-        protected override void OnMouseUp(MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Left && _actionRect.Width > 0 && _actionRect.Contains(e.Location))
-            {
-                EventHandler handler = ActionClicked;
-                if (handler != null) handler(this, EventArgs.Empty);
-            }
-            base.OnMouseUp(e);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -312,7 +282,6 @@ namespace PrinterMonitor
             string sub;
             string warn = "";
             Color warnColor = Theme.Yellow;
-            bool showAction = false;
 
             if (!HasData)
             {
@@ -343,12 +312,6 @@ namespace PrinterMonitor
                     warn = "系统未设置默认打印机，WPS 打印时会弹窗让你选设备";
                     warnColor = Theme.Yellow;
                 }
-                else if (AutoManaged)
-                {
-                    warn = "Windows 会按最近使用记录自动切换默认打印机";
-                    warnColor = Theme.Yellow;
-                    showAction = true;
-                }
                 else if (Current.IsVirtual)
                 {
                     warn = "虚拟打印机，只会生成文件，不会实际出纸";
@@ -371,40 +334,10 @@ namespace PrinterMonitor
             Theme.DrawText(g, sub, _fSub, new Rectangle(subLeft, Theme.Px(70), subWidth, Theme.Px(18)),
                 Theme.TextMuted, TextFormatFlags.Left);
 
-            // 提示行：右侧可带一个「固定默认」按钮
-            int warnCenter = Theme.Px(102);
-            if (showAction)
-            {
-                int btnW = Theme.MeasurePill(g, "固定默认", _fSub);
-                int btnH = Theme.Px(24);
-                _actionRect = new Rectangle(right - btnW, warnCenter - btnH / 2, btnW, btnH);
-            }
-            else
-            {
-                _actionRect = Rectangle.Empty;
-            }
-
             if (warn.Length > 0)
             {
-                int warnRight = _actionRect.Width > 0 ? _actionRect.X - Theme.Px(10) : right;
-                Rectangle warnRect = new Rectangle(subLeft, Theme.Px(89),
-                    Math.Max(Theme.Px(20), warnRight - subLeft), Theme.Px(27));
+                Rectangle warnRect = new Rectangle(subLeft, Theme.Px(89), subWidth, Theme.Px(27));
                 Theme.DrawText(g, warn, _fSub, warnRect, warnColor, TextFormatFlags.Left);
-            }
-
-            if (_actionRect.Width > 0)
-            {
-                bool hover = _actionHover;
-                using (GraphicsPath path = Theme.RoundedRect(_actionRect, _actionRect.Height / 2))
-                {
-                    using (SolidBrush brush = new SolidBrush(hover ? Color.FromArgb(46, Theme.Green)
-                                                                    : Color.FromArgb(26, Theme.Green)))
-                        g.FillPath(brush, path);
-                    using (Pen pen = new Pen(Color.FromArgb(hover ? 160 : 107, Theme.Green), 1f))
-                        g.DrawPath(pen, path);
-                }
-                TextRenderer.DrawText(g, "固定默认", _fSub, _actionRect, Theme.Green,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
         }
     }
@@ -445,29 +378,16 @@ namespace PrinterMonitor
         public PrinterInfo Info;
 
         private bool _hover;
-        private bool _selected;
 
         private readonly Font _fName;
         private readonly Font _fSub;
         private readonly Font _fPill;
-
-        public bool Selected
-        {
-            get { return _selected; }
-            set
-            {
-                if (_selected == value) return;
-                _selected = value;
-                Invalidate();
-            }
-        }
 
         public PrinterCard()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                      ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = Theme.Bg;
-            Cursor = Cursors.Hand;
             _fName = Theme.CardName;
             _fSub = Theme.Pill;
             _fPill = Theme.Pill;
@@ -533,8 +453,7 @@ namespace PrinterMonitor
             }
             finally { g.Restore(clipState); }
 
-            Theme.DrawRoundedBorder(g, card, radius,
-                _selected ? Theme.SelectedBorder : (_hover ? Theme.BorderStrong : Theme.Border));
+            Theme.DrawRoundedBorder(g, card, radius, _hover ? Theme.BorderStrong : Theme.Border);
 
             if (Info == null) return;
 

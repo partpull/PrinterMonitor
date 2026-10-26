@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -108,44 +108,6 @@ namespace PrinterMonitor
                 DestroyIcon(handle);
                 return icon;
             }
-        }
-    }
-
-    /// <summary>Windows「自动管理默认打印机」策略。开启时默认打印机会随最近使用记录自动切换。</summary>
-    internal static class DefaultPrinterPolicy
-    {
-        private const string KeyPath = @"Software\Microsoft\Windows NT\CurrentVersion\Windows";
-        private const string ValueName = "LegacyDefaultPrinterMode";
-
-        /// <summary>true 表示 Windows 会按最近使用记录自动切换默认打印机。</summary>
-        public static bool IsAutoManaged()
-        {
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath, false))
-                {
-                    if (key == null) return true;          // 值缺失等价于开启
-                    object value = key.GetValue(ValueName);
-                    if (value == null) return true;
-                    return Convert.ToInt32(value) == 0;    // 0 = 自动管理，1 = 固定为用户所选
-                }
-            }
-            catch (Exception) { return false; }
-        }
-
-        /// <summary>关闭自动管理，让默认打印机固定为用户所选（写 HKCU，不需要管理员权限）。</summary>
-        public static bool DisableAutoManage()
-        {
-            try
-            {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(KeyPath, true))
-                {
-                    if (key == null) return false;
-                    key.SetValue(ValueName, 1, RegistryValueKind.DWord);
-                    return true;
-                }
-            }
-            catch (Exception) { return false; }
         }
     }
 

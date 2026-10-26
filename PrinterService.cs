@@ -215,17 +215,6 @@ namespace PrinterMonitor
         private static extern bool EnumJobs(IntPtr hPrinter, int FirstJob, int NoJobs, int Level,
                                             IntPtr pJob, int cbBuf, out int pcbNeeded, out int pcReturned);
 
-        [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern bool SetDefaultPrinter(string pszPrinter);
-
-        /// <summary>把指定打印机设为 Windows 默认打印机（WPS 等软件随即可见）。</summary>
-        public static bool SetDefault(string printerName)
-        {
-            if (string.IsNullOrEmpty(printerName)) return false;
-            try { return SetDefaultPrinter(printerName); }
-            catch (Exception) { return false; }
-        }
-
         /// <summary>扫描全部已安装打印机并判定状态。调用方应在后台线程执行。</summary>
         public static List<PrinterInfo> Scan()
         {

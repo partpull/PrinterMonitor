@@ -21,7 +21,6 @@ namespace PrinterMonitor
         public static readonly Color HeroBorder = Color.FromArgb(78, 88, 108);
         public static readonly Color BorderStrong = Color.FromArgb(116, 128, 148);
         public static readonly Color Divider = Color.FromArgb(39, 44, 53);
-        public static readonly Color SelectedBorder = Color.FromArgb(198, 202, 212);
 
         // 文字
         public static readonly Color Text = Color.FromArgb(243, 245, 249);
@@ -341,6 +340,33 @@ namespace PrinterMonitor
                     // 出纸
                     using (GraphicsPath tray = RoundedRect(new Rectangle(7, 14, 10, 7), 1))
                         g.DrawPath(pen, tray);
+                }
+            }
+            finally { g.Restore(state); }
+        }
+
+        /// <summary>在 16×16 的设计坐标系里绘制刷新图标（顺时针圆箭头）。</summary>
+        public static void DrawRefreshGlyph(Graphics g, int x, int y, int size, Color color, float stroke)
+        {
+            if (size <= 0) return;
+            GraphicsState state = g.Save();
+            try
+            {
+                float s = size / 16f;
+                g.TranslateTransform(x, y);
+                g.ScaleTransform(s, s);
+                using (Pen pen = new Pen(color, stroke))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    pen.LineJoin = LineJoin.Round;
+                    using (GraphicsPath arc = new GraphicsPath())
+                    {
+                        arc.AddArc(3f, 3f, 10f, 10f, 20f, 300f);
+                        g.DrawPath(pen, arc);
+                    }
+                    g.DrawLines(pen, new PointF[] {
+                        new PointF(13.2f, 2.6f), new PointF(13.2f, 5.8f), new PointF(10f, 5.8f) });
                 }
             }
             finally { g.Restore(state); }
