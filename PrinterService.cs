@@ -87,18 +87,6 @@ namespace PrinterMonitor
             }
         }
 
-        /// <summary>第二行左侧的连接细节。</summary>
-        public string DetailText
-        {
-            get
-            {
-                string port = string.IsNullOrEmpty(PortName) ? "未知端口" : PortName;
-                string driver = DriverName == null ? "" : DriverName.Trim();
-                if (driver.Length == 0) return port;
-                return port + "  ·  " + driver;
-            }
-        }
-
         /// <summary>列表里名称过长会截断，悬浮提示给出完整信息。</summary>
         public string TooltipText
         {

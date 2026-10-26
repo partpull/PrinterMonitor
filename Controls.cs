@@ -314,8 +314,8 @@ namespace PrinterMonitor
                 }
                 else if (Current.IsVirtual)
                 {
-                    warn = "虚拟打印机，只会生成文件，不会实际出纸";
-                    warnColor = Theme.Yellow;
+                    warn = "只会生成文件，不会实际出纸";
+                    warnColor = Theme.Info;
                 }
                 else if (Current.State == PrinterState.Error)
                 {
@@ -479,33 +479,16 @@ namespace PrinterMonitor
             Theme.DrawText(g, Info.Name, _fName, nameRect, Info.IsUsable ? Theme.Text : Theme.TextMuted,
                 TextFormatFlags.Left);
 
-            // ---- 第二行：连接方式 + 细节 + 状态文案
-            int row2Center = Theme.Px(53);
-            int detailLeft = Theme.Px(40);
-
-            if (Info.IsVirtual)
-            {
-                int pillW = Theme.DrawPillAt(g, detailLeft, row2Center, "虚拟打印机", _fPill,
-                    Theme.Yellow, Color.FromArgb(87, Theme.Yellow), Color.FromArgb(28, Theme.Yellow));
-                detailLeft = detailLeft + pillW + Theme.Px(10);
-            }
-            else
-            {
-                string kind = Info.KindText;
-                int kindW = Theme.MeasureWidth(g, kind, _fSub);
-                Rectangle kindRect = new Rectangle(detailLeft, Theme.Px(43), kindW + Theme.Px(2), Theme.Px(20));
-                Theme.DrawText(g, kind, _fSub, kindRect, Theme.TextMuted, TextFormatFlags.Left);
-                detailLeft = detailLeft + kindW + Theme.Px(10);
-            }
-
+            // ---- 第二行：端口 + 状态文案（驱动信息保留在 ToolTip 中）
             string stateText = Info.StateText;
             int stateW = Theme.MeasureWidth(g, stateText, _fSub);
             Rectangle stateRect = new Rectangle(textRight - stateW - Theme.Px(2), Theme.Px(43), stateW + Theme.Px(2), Theme.Px(20));
             Theme.DrawText(g, stateText, _fSub, stateRect, stateColor, TextFormatFlags.Right);
 
-            Rectangle detailRect = new Rectangle(detailLeft, Theme.Px(43),
-                Math.Max(Theme.Px(20), stateRect.X - detailLeft - Theme.Px(10)), Theme.Px(20));
-            Theme.DrawText(g, Info.DetailText, _fSub, detailRect, Theme.TextDim, TextFormatFlags.Left);
+            string port = string.IsNullOrEmpty(Info.PortName) ? "未知端口" : Info.PortName;
+            Rectangle portRect = new Rectangle(Theme.Px(40), Theme.Px(43),
+                Math.Max(Theme.Px(20), stateRect.X - Theme.Px(40) - Theme.Px(10)), Theme.Px(20));
+            Theme.DrawText(g, port, _fSub, portRect, Theme.TextMuted, TextFormatFlags.Left);
         }
     }
 }

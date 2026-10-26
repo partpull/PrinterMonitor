@@ -95,12 +95,12 @@ namespace PrinterMonitor
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.Clear(Color.Transparent);
-                    using (SolidBrush bg = new SolidBrush(Color.FromArgb(255, 33, 33, 38)))
+                    using (SolidBrush bg = new SolidBrush(Color.FromArgb(255, 27, 28, 31)))
                         g.FillEllipse(bg, 0, 0, size - 1, size - 1);
-                    using (SolidBrush ring = new SolidBrush(Color.FromArgb(255, 70, 70, 80)))
+                    using (SolidBrush ring = new SolidBrush(Color.FromArgb(255, 72, 75, 82)))
                     using (Pen ringPen = new Pen(ring, 1f))
                         g.DrawEllipse(ringPen, 0.5f, 0.5f, size - 2f, size - 2f);
-                    using (SolidBrush fg = new SolidBrush(Color.FromArgb(255, 50, 240, 140)))
+                    using (SolidBrush fg = new SolidBrush(Color.FromArgb(255, 67, 217, 143)))
                         g.FillEllipse(fg, 9f, 9f, 14f, 14f);
                 }
                 IntPtr handle = bmp.GetHicon();

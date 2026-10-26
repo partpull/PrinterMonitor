@@ -73,6 +73,8 @@ namespace PrinterMonitor
             {
                 using (Pen pen = new Pen(Theme.Divider, 1f))
                     e.Graphics.DrawLine(pen, 0, 0, _bottom.Width, 0);
+                TextRenderer.DrawText(e.Graphics, "F5 刷新 · Esc 隐藏", Theme.FootHint, _bottom.ClientRectangle,
+                    Theme.TextDim, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             };
 
             _btnRefresh = new SoftButton();

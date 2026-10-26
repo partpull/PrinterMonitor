@@ -6,48 +6,49 @@ using System.Windows.Forms;
 
 namespace PrinterMonitor
 {
-    /// <summary>提亮深色配色 + 高 DPI 缩放。所有界面尺寸按 96 DPI 的设计值书写，绘制时统一乘以 Scale。</summary>
+    /// <summary>中性深色配色 + 高 DPI 缩放。所有界面尺寸按 96 DPI 的设计值书写，绘制时统一乘以 Scale。</summary>
     internal static class Theme
     {
         // 背景与容器
-        public static readonly Color Bg = Color.FromArgb(31, 35, 43);
-        public static readonly Color HeroCard = Color.FromArgb(62, 71, 89);
-        public static readonly Color HeroCardEnd = Color.FromArgb(46, 52, 64);
-        public static readonly Color Card = Color.FromArgb(74, 84, 102);
-        public static readonly Color CardEnd = Color.FromArgb(55, 62, 77);
-        public static readonly Color CardHover = Color.FromArgb(90, 101, 121);
-        public static readonly Color CardHoverEnd = Color.FromArgb(68, 76, 92);
-        public static readonly Color Border = Color.FromArgb(86, 97, 118);
-        public static readonly Color HeroBorder = Color.FromArgb(78, 88, 108);
-        public static readonly Color BorderStrong = Color.FromArgb(116, 128, 148);
-        public static readonly Color Divider = Color.FromArgb(39, 44, 53);
+        public static readonly Color Bg = Color.FromArgb(27, 28, 31);
+        public static readonly Color HeroCard = Color.FromArgb(52, 54, 59);
+        public static readonly Color HeroCardEnd = Color.FromArgb(39, 41, 45);
+        public static readonly Color Card = Color.FromArgb(63, 66, 72);
+        public static readonly Color CardEnd = Color.FromArgb(49, 51, 56);
+        public static readonly Color CardHover = Color.FromArgb(74, 77, 84);
+        public static readonly Color CardHoverEnd = Color.FromArgb(58, 61, 67);
+        public static readonly Color Border = Color.FromArgb(76, 79, 86);
+        public static readonly Color HeroBorder = Color.FromArgb(60, 62, 68);
+        public static readonly Color BorderStrong = Color.FromArgb(92, 96, 104);
+        public static readonly Color Divider = Color.FromArgb(36, 37, 40);
 
         // 文字
-        public static readonly Color Text = Color.FromArgb(243, 245, 249);
-        public static readonly Color TextMuted = Color.FromArgb(176, 185, 202);
-        public static readonly Color TextDim = Color.FromArgb(150, 160, 177);
+        public static readonly Color Text = Color.FromArgb(244, 244, 246);
+        public static readonly Color TextMuted = Color.FromArgb(184, 184, 191);
+        public static readonly Color TextDim = Color.FromArgb(166, 166, 174);
+        public static readonly Color Info = Color.FromArgb(167, 176, 188);
 
         // 状态色
-        public static readonly Color Green = Color.FromArgb(62, 224, 143);
-        public static readonly Color Yellow = Color.FromArgb(240, 176, 46);
-        public static readonly Color Blue = Color.FromArgb(107, 182, 255);
-        public static readonly Color Gray = Color.FromArgb(139, 148, 166);
-        public static readonly Color Red = Color.FromArgb(240, 96, 79);
+        public static readonly Color Green = Color.FromArgb(67, 217, 143);
+        public static readonly Color Yellow = Color.FromArgb(227, 177, 74);
+        public static readonly Color Blue = Color.FromArgb(121, 174, 219);
+        public static readonly Color Gray = Color.FromArgb(154, 154, 162);
+        public static readonly Color Red = Color.FromArgb(228, 106, 88);
 
         // 自绘按钮与开关
-        public static readonly Color BtnFill = Color.FromArgb(48, 53, 63);
-        public static readonly Color BtnBorder = Color.FromArgb(68, 75, 90);
-        public static readonly Color BtnHover = Color.FromArgb(58, 64, 76);
-        public static readonly Color BtnDown = Color.FromArgb(43, 48, 58);
-        public static readonly Color BtnDisabledFill = Color.FromArgb(43, 48, 58);
-        public static readonly Color BtnDisabledBorder = Color.FromArgb(58, 64, 77);
-        public static readonly Color BtnDisabledText = Color.FromArgb(113, 121, 138);
-        public static readonly Color SwitchOff = Color.FromArgb(60, 66, 78);
-        public static readonly Color SwitchKnobOff = Color.FromArgb(147, 155, 171);
+        public static readonly Color BtnFill = Color.FromArgb(47, 49, 54);
+        public static readonly Color BtnBorder = Color.FromArgb(74, 77, 84);
+        public static readonly Color BtnHover = Color.FromArgb(54, 57, 63);
+        public static readonly Color BtnDown = Color.FromArgb(42, 44, 48);
+        public static readonly Color BtnDisabledFill = Color.FromArgb(42, 44, 48);
+        public static readonly Color BtnDisabledBorder = Color.FromArgb(60, 62, 68);
+        public static readonly Color BtnDisabledText = Color.FromArgb(110, 112, 120);
+        public static readonly Color SwitchOff = Color.FromArgb(58, 60, 66);
+        public static readonly Color SwitchKnobOff = Color.FromArgb(142, 145, 153);
         public static readonly Color SwitchKnobOn = Color.FromArgb(255, 255, 255);
 
-        /// <summary>卡片顶部内高光的透明度（约 12.5%）。</summary>
-        private const int SheenAlpha = 32;
+        /// <summary>卡片顶部内高光的透明度（约 11%）。</summary>
+        private const int SheenAlpha = 28;
 
         private static float _scale = 1f;
 
@@ -106,6 +107,7 @@ namespace PrinterMonitor
         private static Font _fCardName;
         private static Font _fPill;
         private static Font _fSection;
+        private static Font _fFootHint;
 
         public static Font HeroLabel
         {
@@ -135,6 +137,11 @@ namespace PrinterMonitor
         public static Font Section
         {
             get { if (_fSection == null) _fSection = FontAt(12, FontStyle.Regular); return _fSection; }
+        }
+
+        public static Font FootHint
+        {
+            get { if (_fFootHint == null) _fFootHint = FontAt(11, FontStyle.Regular); return _fFootHint; }
         }
 
         public static Color StateColor(PrinterState state)
@@ -297,7 +304,7 @@ namespace PrinterMonitor
                 return;
             }
             int glow = dotRadius * 2;
-            using (SolidBrush brush = new SolidBrush(Color.FromArgb(48, color)))
+            using (SolidBrush brush = new SolidBrush(Color.FromArgb(30, color)))
                 g.FillEllipse(brush, new Rectangle(centerX - glow, centerY - glow, glow * 2, glow * 2));
             using (SolidBrush brush = new SolidBrush(color))
                 g.FillEllipse(brush, new Rectangle(centerX - dotRadius, centerY - dotRadius, dotRadius * 2, dotRadius * 2));
